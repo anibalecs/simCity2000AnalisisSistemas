@@ -131,8 +131,13 @@ class Juego:
             except ValueError:
                 print("Ingreso invalido, ingrese numeros entre 0 y 9")
 
+    def verificar_dinero(self):
+        if(self.jugador.dinero <= 0):
+            print(f"{self.jugador.nombre}, fin del juego. Te has quedado sin dinero")
+            self.juego_terminado = True
+
     def turno(self):
-        while True:
+        while not self.juego_terminado:
             self.mostrar_mapa()
             print(f"Dinero: {self.jugador.dinero}")
             accion = input("Menu (casa, via, demoler, terremoto, salir): ").strip().lower()
@@ -152,19 +157,25 @@ class Juego:
             else:
                 print("Accion no valida, intente de nuevo")
 
+            self.verificar_dinero()
+
     def ingresos_jugador(self):
         while True:
-            time.sleep(300) #cada tantos segundos
+            time.sleep(300) #cada tantos segundos da plata por casa
             for fila in self.mapa:
                 for cuadricula in fila:
                     if(cuadricula.tipo == "casa" and cuadricula.construccion):
                         self.jugador.dinero += cuadricula.construccion.generar_dinero()
+            print("\n Actualizacion por ingresos:")
+            self.mostrar_mapa()
 
     def terremoto_random(self):
-        while True:
-            time.sleep(random.randint(1000, 1500)) #terremoto random cada tanto o tantos segundos
+        while not self.juego_terminado:
+            time.sleep(random.randint(1000, 1500)) #terremoto random cada tantos o tantos segundos
             terremoto = Terremoto()
             terremoto.destruir_construcciones(self.mapa)
+            print("\nActualizacion de mapa por terremoto:")
+            self.mostrar_mapa()
 
 if(__name__ == "__main__"):
     nombre = input("Ingrese su nombre: ")
