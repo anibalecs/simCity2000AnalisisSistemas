@@ -6,7 +6,7 @@ class Cuadricula:
     def __init__(self, x, y, tipo):
         self.x = x
         self.y = y
-        self.tipo = tipo  #agua, tierra, via, casa
+        self.tipo = tipo
         self.construccion = None
 
     def via_vecino(self, mapa):
@@ -29,18 +29,24 @@ class Casa(Construccion):
     def __init__(self):
         super().__init__(costo=100)
         self.obra = True
-        self.tiempo_construccion = 5
+        self.tiempo_construccion = 30 #120 luego
 
     def construccion_lista(self):
         self.obra = False
-        print("Construccion completada!")
 
     def generar_dinero(self):
-        return 30
+        if(not self.obra):
+            return 30
+        return 0
 
 class Via(Construccion):
     def __init__(self):
         super().__init__(costo=50)
+        self.obra = True
+        self.tiempo_construccion = 15 #60 luego
+
+    def construccion_lista(self):
+        self.obra = False
 
 class Jugador:
     def __init__(self, nombre, dinero_inicial=750):
@@ -58,8 +64,8 @@ class Jugador:
                 cuadricula.tipo = "casa"
                 cuadricula.construccion = casa
                 print(f"Casa comprada en ({cuadricula.y}, {cuadricula.x})")
-                time.sleep(casa.tiempo_construccion)
-                casa.construccion_lista()
+
+                threading.Thread(target=juego.construir_casa_async, args=(cuadricula,), daemon=True).start() #hilo para la obra
             else:
                 print("Dinero insuficiente")
         else:
@@ -75,7 +81,9 @@ class Jugador:
                 self.dinero -= via.costo
                 cuadricula.tipo = "via"
                 cuadricula.construccion = via
-                print(f"Via construida en ({cuadricula.y}, {cuadricula.x})") #invertido
+                print(f"Via en construccion en ({cuadricula.y}, {cuadricula.x})") #invertido
+
+                threading.Thread(target=juego.construir_via_async, args=(cuadricula,), daemon=True).start()
             else:
                 print("Dinero insuficiente")
         else:
@@ -138,10 +146,32 @@ class Juego:
             print(f"{self.jugador.nombre}, fin del juego. Te has quedado sin dinero")
             self.juego_terminado = True
 
+    def construir_casa_async(self, cuadricula):
+        casa = cuadricula.construccion
+        print(f"Construcción de casa iniciada en ({cuadricula.y}, {cuadricula.x})")
+        
+        time.sleep(casa.tiempo_construccion)
+        with self.lock:
+            casa.construccion_lista()
+            self.actualizaciones.append(f"Construccion completa. Casa en ({cuadricula.y}, {cuadricula.x}) finalizada")
+
+    def construir_via_async(self, cuadricula):
+        via = cuadricula.construccion
+        time.sleep(via.tiempo_construccion)
+        with self.lock:
+            via.construccion_lista()
+            self.actualizaciones.append(f"Construccion completada. Via en ({cuadricula.y}, {cuadricula.x}) finalizada")
+
     def mostrar(self):
         simbolos = {"tierra": "T", "agua": "A", "via": "V", "casa": "C"}
         for fila in self.mapa:
-            print(" ".join([simbolos[cuadricula.tipo] for cuadricula in fila]))
+            fila_simbolos = []
+            for cuadricula in fila:
+                if(cuadricula.construccion and cuadricula.construccion.obra):
+                    fila_simbolos.append("O")
+                else:
+                    fila_simbolos.append(simbolos[cuadricula.tipo])
+            print(" ".join(fila_simbolos))
         print(f"Dinero: {self.jugador.dinero}")
 
     def turno(self):
@@ -173,16 +203,19 @@ class Juego:
 
     def ingresos_jugador(self):
         while not self.juego_terminado:
-            time.sleep(30) #cada tantos segundos da plata por casa
+            time.sleep(30)
             with self.lock:
-                if any(c.tipo == "casa" for fila in self.mapa for c in fila):
-                    ingreso = sum(c.construccion.generar_dinero() for fila in self.mapa for c in fila if c.tipo == "casa")
+                ingreso = sum(
+                    c.construccion.generar_dinero() 
+                    for fila in self.mapa for c in fila if c.tipo == "casa"
+                )
+                if ingreso > 0:
                     self.jugador.dinero += ingreso
                     self.actualizaciones.append(f"Ingresos recibidos: {ingreso}")
 
     def terremoto_random(self):
         while not self.juego_terminado:
-            time.sleep(random.randint(60, 100)) #terremoto random cada tantos o tantos segundos
+            time.sleep(random.randint(60, 100))
             terremoto = Terremoto()
             terremoto.destruir_construcciones(self.mapa, self.actualizaciones, self.lock)
 
@@ -191,7 +224,7 @@ if(__name__ == "__main__"):
     jugador = Jugador(nombre)
     juego = Juego(jugador)
 
-    #inicia hilos para ingresos y terremotos
+    #inicia hilos para ingresos y terremotos, esto permite que se ejecuten en paralelo y con el daemon permite que se ejecuten en segundo plano y asi continue el turno
     threading.Thread(target = juego.ingresos_jugador, daemon = True).start()
     threading.Thread(target = juego.terremoto_random, daemon = True).start()
 
