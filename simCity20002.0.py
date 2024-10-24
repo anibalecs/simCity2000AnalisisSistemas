@@ -57,7 +57,7 @@ class Jugador:
                 self.dinero -= casa.costo
                 cuadricula.tipo = "casa"
                 cuadricula.construccion = casa
-                print(f"Casa comprada en ({cuadricula.x}, {cuadricula.y})")
+                print(f"Casa comprada en ({cuadricula.y}, {cuadricula.x})")
                 time.sleep(casa.tiempo_construccion)
                 casa.construccion_lista()
             else:
@@ -75,7 +75,7 @@ class Jugador:
                 self.dinero -= via.costo
                 cuadricula.tipo = "via"
                 cuadricula.construccion = via
-                print(f"Via construida en ({cuadricula.x}, {cuadricula.y})")
+                print(f"Via construida en ({cuadricula.y}, {cuadricula.x})") #invertido
             else:
                 print("Dinero insuficiente")
         else:
@@ -87,7 +87,7 @@ class Jugador:
             if(self.dinero >= costo_demolicion):
                 self.dinero -= costo_demolicion
                 cuadricula.demoler()
-                print(f"Construccion en ({cuadricula.x}, {cuadricula.y}) demolida")
+                print(f"Construccion en ({cuadricula.y}, {cuadricula.x}) demolida") #invertido
             else:
                 print("Dinero insuficiente")
         else:
@@ -97,27 +97,29 @@ class Terremoto:
     def __init__(self, intensidad=3):
         self.intensidad = intensidad
 
-    def destruir_construcciones(self, mapa):
-        print("Terremoto! Algunas construcciones fueron destruidas")
-        for _ in range(self.intensidad):
-            x, y = random.randint(0, 9), random.randint(0, 9)
-            if(mapa[x][y].construccion):
-                mapa[x][y].demoler()
-                print(f"Construcción en ({x}, {y}) destruida")
+    def destruir_construcciones(self, mapa, actualizaciones, lock):
+        destruido = False
+        with lock:
+            for _ in range(self.intensidad):
+                x, y = random.randint(0, 9), random.randint(0, 9)
+                if(mapa[x][y].construccion):
+                    mapa[x][y].demoler()
+                    actualizaciones.append(f"Construcción en ({x}, {y}) destruida")
+                    destruido = True
+            if(not destruido):
+                actualizaciones.append("Terremoto! Pero no se destuyo ninguna construccion")
 
 class Juego:
     def __init__(self, jugador):
         self.mapa = [[self.crear_cuadricula(x, y) for y in range(10)] for x in range(10)]
         self.jugador = jugador
+        self.juego_terminado = False
+        self.actualizaciones = []
+        self.lock = threading.Lock()
 
     def crear_cuadricula(self, x, y):
         tipo = random.choice(["tierra", "agua"])
         return Cuadricula(x, y, tipo)
-
-    def mostrar_mapa(self):
-        simbolos = {"tierra": "T", "agua": "A", "via": "V", "casa": "C"}
-        for fila in self.mapa:
-            print(" ".join([simbolos[cuadricula.tipo] for cuadricula in fila]))
 
     def obtener_cuadricula(self):
         while True:
@@ -136,10 +138,20 @@ class Juego:
             print(f"{self.jugador.nombre}, fin del juego. Te has quedado sin dinero")
             self.juego_terminado = True
 
+    def mostrar(self):
+        simbolos = {"tierra": "T", "agua": "A", "via": "V", "casa": "C"}
+        for fila in self.mapa:
+            print(" ".join([simbolos[cuadricula.tipo] for cuadricula in fila]))
+        print(f"Dinero: {self.jugador.dinero}")
+
     def turno(self):
         while not self.juego_terminado:
-            self.mostrar_mapa()
-            print(f"Dinero: {self.jugador.dinero}")
+            with self.lock:
+                for mensaje in self.actualizaciones:
+                    print(mensaje)
+                self.actualizaciones.clear()
+
+            self.mostrar()
             accion = input("Menu (casa, via, demoler, terremoto, salir): ").strip().lower()
 
             if(accion == "salir"):
@@ -160,22 +172,19 @@ class Juego:
             self.verificar_dinero()
 
     def ingresos_jugador(self):
-        while True:
-            time.sleep(300) #cada tantos segundos da plata por casa
-            for fila in self.mapa:
-                for cuadricula in fila:
-                    if(cuadricula.tipo == "casa" and cuadricula.construccion):
-                        self.jugador.dinero += cuadricula.construccion.generar_dinero()
-            print("\n Actualizacion por ingresos:")
-            self.mostrar_mapa()
+        while not self.juego_terminado:
+            time.sleep(30) #cada tantos segundos da plata por casa
+            with self.lock:
+                if any(c.tipo == "casa" for fila in self.mapa for c in fila):
+                    ingreso = sum(c.construccion.generar_dinero() for fila in self.mapa for c in fila if c.tipo == "casa")
+                    self.jugador.dinero += ingreso
+                    self.actualizaciones.append(f"Ingresos recibidos: {ingreso}")
 
     def terremoto_random(self):
         while not self.juego_terminado:
-            time.sleep(random.randint(1000, 1500)) #terremoto random cada tantos o tantos segundos
+            time.sleep(random.randint(60, 100)) #terremoto random cada tantos o tantos segundos
             terremoto = Terremoto()
-            terremoto.destruir_construcciones(self.mapa)
-            print("\nActualizacion de mapa por terremoto:")
-            self.mostrar_mapa()
+            terremoto.destruir_construcciones(self.mapa, self.actualizaciones, self.lock)
 
 if(__name__ == "__main__"):
     nombre = input("Ingrese su nombre: ")
